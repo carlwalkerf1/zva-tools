@@ -15,9 +15,12 @@ By default it sets:
 
 ## Install
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser (if you haven't already).
-2. **[Click here to install the script](https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js)** — Tampermonkey will detect it and show an install prompt automatically.
-3. Make sure Tampermonkey's site access (in your browser's extension settings) is set to allow it to run automatically on `zoom.us` — some browsers default extensions to "on click only," which prevents userscripts from running on page load.
+1. Install Tampermonkey extension https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=en
+2. Go to chrome://extensions/
+3. Enable Developer mode in upper-left corner if necessary.
+4. Scroll to Tampermonkey and click Details 
+5. Enable Allow User Scripts.
+6. **[Click here to install the script](https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js)** — Tampermonkey will detect it and show an install prompt automatically.
 
 Updates: since this script's `@updateURL` points back at this repo, Tampermonkey will pick up future changes automatically — no need to reinstall.
 
