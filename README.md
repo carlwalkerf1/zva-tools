@@ -15,11 +15,11 @@ By default it sets:
 
 ## Install
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser.
-2. Open Tampermonkey's dashboard → **Create a new script**.
-3. Delete the boilerplate and paste in the contents of [`coach-auto-filters.user.js`](./coach-auto-filters.user.js).
-4. Save (Cmd/Ctrl+S).
-5. Make sure Tampermonkey's site access (in your browser's extension settings) is set to allow it to run automatically on `zoom.us` — some browsers default extensions to "on click only," which prevents userscripts from running on page load.
+1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser (if you haven't already).
+2. **[Click here to install the script](https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js)** — Tampermonkey will detect it and show an install prompt automatically.
+3. Make sure Tampermonkey's site access (in your browser's extension settings) is set to allow it to run automatically on `zoom.us` — some browsers default extensions to "on click only," which prevents userscripts from running on page load.
+
+Updates: since this script's `@updateURL` points back at this repo, Tampermonkey will pick up future changes automatically — no need to reinstall.
 
 ## Customizing
 
