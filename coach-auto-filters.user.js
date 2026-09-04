@@ -1,23 +1,28 @@
 // ==UserScript==
-// @name         Zoom AI Studio Coach - Auto Filters
-// @namespace    https://github.com/carlwalkerf1/zva-coach-auto-filters
-// @version      1.0.0
-// @description  Reapplies the Agent, Query matching, and page-size filters on the ZVA Knowledge Library Coach page every time you load it
+// @name         ZVA Tools
+// @namespace    https://github.com/carlwalkerf1/zva-tools
+// @version      1.2.0
+// @description  Reapplies filters on the ZVA Knowledge Library Coach page every load, and adds a "Needs Coaching" button to select rows with a blank Disposition
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
 // @run-at       document-idle
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/carlwalkerf1/zva-coach-auto-filters/main/coach-auto-filters.user.js
-// @downloadURL  https://raw.githubusercontent.com/carlwalkerf1/zva-coach-auto-filters/main/coach-auto-filters.user.js
+// @updateURL    https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js
+// @downloadURL  https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js
 // ==/UserScript==
 
 (function () {
   'use strict';
 
   // ---- Edit these to change what gets applied ----
+  // Agent is safe to force 100% of the time for this subteam (the other agent
+  // options are neglected/older versions). Query matching is NOT forced anymore -
+  // "No match" was too narrow an assumption (there are legitimate reasons to want
+  // to coach matched queries too). Revisit with a real auto-select preferences UI
+  // instead of re-enabling this blindly.
   const DESIRED_FILTERS = [
     { idSuffix: 'bot-agent-filter-input', labels: ['Star ✦ 3.0'] },
-    { idSuffix: 'match-type-input', labels: ['No match'] },
+    // { idSuffix: 'match-type-input', labels: ['No match'] },
   ];
   const DESIRED_PAGE_SIZE = '100 per page';
   // --------------------------------------------------
@@ -214,6 +219,100 @@
   }
 
   run();
+
+  // ---- "Needs Coaching" button + "show only blank disposition" toggle ----
+  // The table is a plain ARIA grid (<table role=...>), not a Prism popover-based
+  // widget, so no click-simulation tricks are needed here - just reading cells
+  // and clicking real checkboxes.
+
+  function getDispositionColIndex() {
+    const headerCells = document.querySelectorAll('thead th[role="columnheader"]');
+    for (const th of headerCells) {
+      const label = th.querySelector('.ui-Table-cell-label');
+      if (label && label.textContent.trim() === 'Disposition') {
+        return th.getAttribute('aria-colindex');
+      }
+    }
+    return null;
+  }
+
+  const getBodyRows = () => document.querySelectorAll('tbody tr[role="row"]');
+
+  function isRowBlankDisposition(row, colIndex) {
+    const cell = row.querySelector(`td[aria-colindex="${colIndex}"] .ui-Table-cell-label`);
+    if (!cell) return false;
+    const text = cell.textContent.trim();
+    return text === '' || text === '--';
+  }
+
+  const getRowCheckbox = (row) => row.querySelector('.ui-Table-selection-column input[type="checkbox"]');
+
+  function selectNeedsCoachingRows() {
+    const colIndex = getDispositionColIndex();
+    if (!colIndex) {
+      console.warn('[coach-auto-filters] could not find the Disposition column');
+      return;
+    }
+    let count = 0;
+    getBodyRows().forEach((row) => {
+      if (!isRowBlankDisposition(row, colIndex)) return;
+      const checkbox = getRowCheckbox(row);
+      if (checkbox && !checkbox.checked) {
+        checkbox.click();
+        count++;
+      }
+    });
+    console.log('[coach-auto-filters] selected', count, 'row(s) with blank Disposition');
+  }
+
+  let hideNonBlankActive = false;
+  function toggleHideNonBlank(button) {
+    const colIndex = getDispositionColIndex();
+    if (!colIndex) {
+      console.warn('[coach-auto-filters] could not find the Disposition column');
+      return;
+    }
+    hideNonBlankActive = !hideNonBlankActive;
+    getBodyRows().forEach((row) => {
+      const blank = isRowBlankDisposition(row, colIndex);
+      row.style.display = hideNonBlankActive && !blank ? 'none' : '';
+    });
+    button.textContent = hideNonBlankActive ? 'Show all rows' : 'Show only blank disposition';
+  }
+
+  const HELPER_BUTTON_STYLE =
+    'margin-left: 8px; padding: 6px 12px; font-size: 14px; border-radius: 6px; ' +
+    'border: 1px solid #c8ccd4; background: #fff; cursor: pointer;';
+
+  function injectCoachHelperButtons() {
+    const resetBtn = document.querySelector('button[aria-label="Reset"]');
+    if (!resetBtn || !resetBtn.parentElement) return;
+    if (resetBtn.parentElement.querySelector('[data-coach-helper]')) return; // already injected
+
+    const needsCoachingBtn = document.createElement('button');
+    needsCoachingBtn.type = 'button';
+    needsCoachingBtn.textContent = 'Needs Coaching';
+    needsCoachingBtn.dataset.coachHelper = 'needs-coaching';
+    needsCoachingBtn.style.cssText = HELPER_BUTTON_STYLE;
+    needsCoachingBtn.title = 'Check every row on this page whose Disposition is blank';
+    needsCoachingBtn.addEventListener('click', selectNeedsCoachingRows);
+
+    const hideBtn = document.createElement('button');
+    hideBtn.type = 'button';
+    hideBtn.textContent = 'Show only blank disposition';
+    hideBtn.dataset.coachHelper = 'hide-non-blank';
+    hideBtn.style.cssText = HELPER_BUTTON_STYLE;
+    hideBtn.title = 'Hide rows that already have a Disposition set';
+    hideBtn.addEventListener('click', () => toggleHideNonBlank(hideBtn));
+
+    resetBtn.insertAdjacentElement('afterend', needsCoachingBtn);
+    needsCoachingBtn.insertAdjacentElement('afterend', hideBtn);
+  }
+
+  // The filter bar can re-render (e.g. after our own filter clicks above), which can
+  // wipe out manually-injected DOM nodes React doesn't know about - so keep re-checking
+  // rather than injecting once and hoping it sticks.
+  setInterval(injectCoachHelperButtons, 1500);
 
   // Re-run if the app navigates here via client-side routing instead of a full page load.
   let lastPath = location.pathname + location.search;
