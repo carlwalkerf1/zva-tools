@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.2.0
-// @description  Reapplies filters on the ZVA Knowledge Library Coach page every load, and adds a "Needs Coaching" button to select rows with a blank Disposition
+// @version      1.3.0
+// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, and hides the Zoom top nav + sidebar across the AI Studio Knowledge Library
 // @author       carlwalkerf1
-// @match        https://zoom.us/ai-studio/kb/coach*
+// @match        https://zoom.us/ai-studio/kb/*
 // @run-at       document-idle
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js
@@ -207,6 +207,10 @@
     } catch {
       console.warn('[coach-auto-filters] page-size control never appeared');
     }
+
+    // Clicking the page-size control (at the bottom of the table) leaves the
+    // page scrolled down there - scroll back to the top once we're done with it.
+    window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
   async function run() {
@@ -218,23 +222,31 @@
     }
   }
 
-  run();
+  // Filters/buttons/column-hiding are Coach-page-specific; the navbar hiding
+  // below applies to every /ai-studio/kb/* page.
+  const isCoachPage = () => location.pathname.includes('/ai-studio/kb/coach');
+
+  if (isCoachPage()) run();
 
   // ---- "Needs Coaching" button + "show only blank disposition" toggle ----
   // The table is a plain ARIA grid (<table role=...>), not a Prism popover-based
   // widget, so no click-simulation tricks are needed here - just reading cells
   // and clicking real checkboxes.
 
-  function getDispositionColIndex() {
+  // Most header cells' text lives in a `.ui-Table-cell-label` span, but "Query" has a
+  // tooltip icon and renders without that class - read the whole header-wrapper's text
+  // instead, since icons contribute no text content and this covers every column.
+  function getColIndexByLabel(label) {
     const headerCells = document.querySelectorAll('thead th[role="columnheader"]');
     for (const th of headerCells) {
-      const label = th.querySelector('.ui-Table-cell-label');
-      if (label && label.textContent.trim() === 'Disposition') {
+      const wrapper = th.querySelector('.ui-Table-header-wrapper');
+      if (wrapper && wrapper.textContent.trim() === label) {
         return th.getAttribute('aria-colindex');
       }
     }
     return null;
   }
+  const getDispositionColIndex = () => getColIndexByLabel('Disposition');
 
   const getBodyRows = () => document.querySelectorAll('tbody tr[role="row"]');
 
@@ -312,7 +324,29 @@
   // The filter bar can re-render (e.g. after our own filter clicks above), which can
   // wipe out manually-injected DOM nodes React doesn't know about - so keep re-checking
   // rather than injecting once and hoping it sticks.
-  setInterval(injectCoachHelperButtons, 1500);
+  if (isCoachPage()) setInterval(injectCoachHelperButtons, 1500);
+
+  // ---- Hidden columns ----
+  // Edit this list to change which columns get hidden. Unlike the column-reordering
+  // attempt that got reverted, this only toggles `display: none` on existing cells -
+  // it never moves a node React owns, so there's no risk of it fighting a re-render
+  // and putting the wrong data under the wrong header. Worst case if React resets the
+  // style, the column just becomes visible again for a moment until the next interval tick.
+  const HIDDEN_COLUMNS = ['Agent', 'Knowledge base', 'Language'];
+
+  function hideUnwantedColumns() {
+    HIDDEN_COLUMNS.forEach((label) => {
+      const colIndex = getColIndexByLabel(label);
+      if (!colIndex) return;
+      const headerCell = document.querySelector(`thead th[aria-colindex="${colIndex}"]`);
+      if (headerCell) headerCell.style.display = 'none';
+      document.querySelectorAll(`tbody td[aria-colindex="${colIndex}"]`).forEach((td) => {
+        td.style.display = 'none';
+      });
+    });
+  }
+
+  if (isCoachPage()) setInterval(hideUnwantedColumns, 1500);
 
   // Re-run if the app navigates here via client-side routing instead of a full page load.
   let lastPath = location.pathname + location.search;
@@ -332,4 +366,57 @@
     };
   });
   window.addEventListener('popstate', maybeRerun);
+
+  // ---- Hide navbars ----
+  // Applies to every /ai-studio/kb/* page, not just Coach. #header_container is the
+  // top nav (both its rows); #sidemenu is the left nav, which turns out to be its own
+  // separate Vue app (data-v-app) that mounts later than header_container - so a single
+  // fire-once apply missed it. Unlike the table, hiding is a plain style toggle with no
+  // node-moving, so polling to catch late mounts / re-renders carries none of the
+  // reorder's data-misalignment risk - worst case is a brief flash of the element.
+  // Target the sticky wrapper column around #sidemenu, not the aside itself -
+  // hiding just the aside left its parent's own box (and background) behind as
+  // an empty gray rectangle still reserving the width.
+  const NAVBAR_SELECTORS = ['#header_container', '.nav-menu.nav-menu-sticky-layout'];
+  let navbarsHidden = true;
+
+  function applyNavbarVisibility() {
+    NAVBAR_SELECTORS.forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      // A plain `el.style.display = 'none'` loses to a stylesheet rule that uses
+      // !important (confirmed on #sidemenu: computed style stayed "block" even
+      // though el.style.display read back as "none") - setProperty is the only
+      // way to set an inline !important override from JS.
+      if (navbarsHidden) {
+        el.style.setProperty('display', 'none', 'important');
+      } else {
+        el.style.removeProperty('display');
+      }
+    });
+  }
+
+  const NAVBAR_TOGGLE_STYLE =
+    'position: fixed; top: 8px; left: 8px; z-index: 999999; padding: 4px 10px; ' +
+    'font-size: 12px; border-radius: 6px; border: 1px solid #c8ccd4; background: #fff; ' +
+    'cursor: pointer; opacity: 0.6;';
+
+  function injectNavbarToggle() {
+    if (document.querySelector('[data-coach-helper="navbar-toggle"]')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.coachHelper = 'navbar-toggle';
+    btn.style.cssText = NAVBAR_TOGGLE_STYLE;
+    btn.textContent = 'Show navbars';
+    btn.title = 'Toggle the Zoom top nav and left sidebar on/off';
+    btn.addEventListener('click', () => {
+      navbarsHidden = !navbarsHidden;
+      applyNavbarVisibility();
+      btn.textContent = navbarsHidden ? 'Show navbars' : 'Hide navbars';
+    });
+    document.body.appendChild(btn);
+  }
+
+  injectNavbarToggle();
+  setInterval(applyNavbarVisibility, 1000);
 })();

@@ -1,10 +1,12 @@
 # ZVA Tools
 
-A [Tampermonkey](https://www.tampermonkey.net/) userscript for the Zoom AI Studio Knowledge Library **Coach** page (`https://zoom.us/ai-studio/kb/coach`):
+A [Tampermonkey](https://www.tampermonkey.net/) userscript for the Zoom AI Studio Knowledge Library, mainly the **Coach** page (`https://zoom.us/ai-studio/kb/coach`):
 
-- Reapplies your preferred filters every time you load the page, instead of clicking through them by hand each visit.
+- Reapplies your preferred filters and page size every time you load the Coach page, instead of clicking through them by hand each visit.
 - Adds a **"Needs Coaching"** button that checks every row on the current page whose **Disposition** column is blank (`--`) — there's no native way to filter or bulk-select on that today.
 - Adds a **"Show only blank disposition"** toggle to hide everything else so you can see just what needs attention.
+- Hides the **Agent**, **Knowledge base**, and **Language** columns on the Coach table — with them gone, there's enough width to see checkboxes and Disposition on screen at once, which is otherwise impossible without horizontal scrolling.
+- Hides Zoom's top nav bar and left sidebar across every `/ai-studio/kb/*` page (Knowledge, Coach, Review, Settings), reclaiming vertical/horizontal space for the actual app. A small **"Show navbars" / "Hide navbars"** toggle stays pinned to the top-left corner for the rare case you need to navigate elsewhere.
 
 By default it sets:
 
@@ -41,15 +43,33 @@ const DESIRED_PAGE_SIZE = '100 per page';
 - It's additive: it only adds missing selections, it won't remove an option that's already selected for some other reason.
 - Uncomment the `match-type-input` line (and adjust its `labels`) if you want Query matching auto-set again.
 
+Further down, `HIDDEN_COLUMNS` controls which Coach table columns get hidden:
+
+```js
+const HIDDEN_COLUMNS = ['Agent', 'Knowledge base', 'Language'];
+```
+
+Remove an entry (or add another column's exact header text) to change what's hidden.
+
 ## The "Needs Coaching" button
 
 Located next to the **Reset** button in the filter bar. It reads the table's `Disposition` column (found dynamically by header text, not a hardcoded position) and clicks the row checkbox for every row where that column reads blank (`--`). This only affects rows currently loaded on the page — for large result sets you'd still page through and click it on each page.
+
+## Hiding the top nav and sidebar
+
+A tiny toggle button sits pinned to the top-left corner of every `/ai-studio/kb/*` page. It starts as **"Show navbars"** (meaning: navbars are currently hidden, click to bring them back) and flips to **"Hide navbars"** once shown. This is a pure `display: none` toggle — it never moves or restructures anything, so it can't scramble page content the way DOM reordering could (see below).
+
+One known cosmetic issue: hiding the top nav currently leaves a bit of dead blank space at the very top of the page (there's a separate, not-yet-found CSS rule reserving that height to compensate for the nav normally being fixed-position). It's harmless — you just scroll past it — not yet fixed.
 
 ## How it works
 
 The filters are Zoom's internal "Prism" (MUI-based React) dropdown components. A plain `.click()` on their combobox doesn't open the dropdown, because the app listens for a fuller `pointerdown`/`mousedown`/`focus` sequence — so the script simulates that instead of a bare click. Each filter's own popover is looked up via its `aria-describedby` attribute (rather than "whichever popover happens to be open") to avoid racing against a previous dropdown that hasn't fully closed yet.
 
-The results table, by contrast, is a plain semantic `<table>` (ARIA grid), so the coaching button just reads cell text and clicks real checkboxes — no simulated-event tricks needed there.
+The results table, by contrast, is a plain semantic `<table>` (ARIA grid), so the coaching button and column-hiding just read cell text and toggle styles / click real checkboxes — no simulated-event tricks needed there.
+
+The nav-hiding target elements belong to an older, separate page shell (not the React app), and one of them (the sidebar) is overridden by a stylesheet rule using `!important` — a plain `el.style.display = 'none'` silently loses to that, so it's set via `el.style.setProperty('display', 'none', 'important')` instead.
+
+**Column reordering was attempted and reverted.** An earlier version physically moved `<td>`/`<th>` DOM nodes to reorder columns. That table is actively managed by React, and moving nodes it owns turned out to risk real data ending up under the wrong header on re-render (confirmed while testing — not hypothetical). Column *hiding* avoids this entirely since it only toggles an existing node's visibility rather than relocating it.
 
 ## Limitations
 
