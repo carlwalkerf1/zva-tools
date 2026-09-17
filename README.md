@@ -6,7 +6,7 @@ A [Tampermonkey](https://www.tampermonkey.net/) userscript for the Zoom AI Studi
 - Adds a **"Needs Coaching"** button that checks every row on the current page whose **Disposition** column is blank (`--`) — there's no native way to filter or bulk-select on that today.
 - Adds a **"Show only blank disposition"** toggle to hide everything else so you can see just what needs attention.
 - Hides the **Agent**, **Knowledge base**, and **Language** columns on the Coach table — with them gone, there's enough width to see checkboxes and Disposition on screen at once, which is otherwise impossible without horizontal scrolling.
-- Hides Zoom's top nav bar and left sidebar across every `/ai-studio/kb/*` page (Knowledge, Coach, Review, Settings), reclaiming vertical/horizontal space for the actual app. A small **"Show navbars" / "Hide navbars"** toggle stays pinned to the top-left corner for the rare case you need to navigate elsewhere.
+- Hides Zoom's top nav bar and left sidebar, reclaiming space for the actual app. A small **"Show navbars" / "Hide navbars"** toggle stays pinned to the top-left corner for the rare case you need to navigate elsewhere.
 
 By default it sets:
 
@@ -57,7 +57,9 @@ Located next to the **Reset** button in the filter bar. It reads the table's `Di
 
 ## Hiding the top nav and sidebar
 
-A tiny toggle button sits pinned to the top-left corner of every `/ai-studio/kb/*` page. It starts as **"Show navbars"** (meaning: navbars are currently hidden, click to bring them back) and flips to **"Hide navbars"** once shown. This is a pure `display: none` toggle — it never moves or restructures anything, so it can't scramble page content the way DOM reordering could (see below).
+A tiny toggle button sits pinned to the top-left corner of the Coach page. It starts as **"Show navbars"** (meaning: navbars are currently hidden, click to bring them back) and flips to **"Hide navbars"** once shown. This is a pure `display: none` toggle — it never moves or restructures anything, so it can't scramble page content the way DOM reordering could (see below).
+
+**Scope is deliberately limited to just the Coach page (`@match https://zoom.us/ai-studio/kb/coach*`) for now.** This used to run across every `/ai-studio/kb/*` page, but other pages in the wider AI Studio product (e.g. `/ai-studio/virtual-agent/agents`) have their own layouts and column needs that this hasn't been checked against — hiding a column or navbar element there could break something we haven't seen yet. Revisit broadening this once each page's actual needs are understood, rather than assuming what worked for Coach is safe everywhere.
 
 One known cosmetic issue: hiding the top nav currently leaves a bit of dead blank space at the very top of the page (there's a separate, not-yet-found CSS rule reserving that height to compensate for the nav normally being fixed-position). It's harmless — you just scroll past it — not yet fixed.
 

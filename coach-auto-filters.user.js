@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.5.0
-// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, and hides the Zoom top nav + sidebar across the AI Studio Knowledge Library
+// @version      1.5.1
+// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, and hides the Zoom top nav + sidebar - Coach page only for now
 // @author       carlwalkerf1
-// @match        https://zoom.us/ai-studio/kb/*
+// @match        https://zoom.us/ai-studio/kb/coach*
 // @run-at       document-idle
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js
