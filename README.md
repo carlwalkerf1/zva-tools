@@ -7,11 +7,13 @@ A [Tampermonkey](https://www.tampermonkey.net/) userscript for the Zoom AI Studi
 - Adds a **"Show only blank disposition"** toggle to hide everything else so you can see just what needs attention.
 - Hides the **Agent**, **Knowledge base**, and **Language** columns on the Coach table — with them gone, there's enough width to see checkboxes and Disposition on screen at once, which is otherwise impossible without horizontal scrolling.
 - Hides Zoom's top nav bar and left sidebar, reclaiming space for the actual app. A small **"Show navbars" / "Hide navbars"** toggle stays pinned to the top-left corner for the rare case you need to navigate elsewhere.
+- On the individual query page (`https://zoom.us/ai-studio/kb/coach/selected`), always forces **Knowledge base = FirstUp KB**.
 
 By default it sets:
 
 - **Agent** = `Star ✦ 3.0` (this subteam uses this agent 100% of the time — the other agents are neglected/older versions, so it's safe to force)
 - **Page size** = `100 per page`
+- **Knowledge base (on the individual query page only)** = `FirstUp KB`
 
 **Query matching is currently NOT auto-set.** It used to default to `No match`, but that assumed you'd only ever want to coach unmatched queries — not true in practice. It's commented out in the script rather than removed; the real fix is a proper "auto-select preferences" UI rather than guessing at one hardcoded value, which isn't built yet.
 
@@ -36,6 +38,7 @@ const DESIRED_FILTERS = [
   // { idSuffix: 'match-type-input', labels: ['No match'] },
 ];
 const DESIRED_PAGE_SIZE = '100 per page';
+const DESIRED_KNOWLEDGE_BASE = 'FirstUp KB'; // used on the /coach/selected page only
 ```
 
 - `idSuffix` targets a specific filter control on the page (its DOM id can have a random prefix, so it's matched by suffix).
@@ -72,6 +75,8 @@ The filters are Zoom's internal "Prism" (MUI-based React) dropdown components. A
 The results table, by contrast, is a plain semantic `<table>` (ARIA grid), so the coaching button and column-hiding just read cell text and toggle styles / click real checkboxes — no simulated-event tricks needed there.
 
 The nav-hiding target elements belong to an older, separate page shell (not the React app), and one of them (the sidebar) is overridden by a stylesheet rule using `!important` — a plain `el.style.display = 'none'` silently loses to that, so it's set via `el.style.setProperty('display', 'none', 'important')` instead.
+
+The individual query page's Knowledge base dropdown is the exact same Prism component, just a different CSS build hash, so it reuses the same open/select/close logic. It's found via `input[aria-label="Knowledge base"]` rather than a stable id (it has none) — the list page's own "Knowledge base (All)" filter only carries a placeholder, not that `aria-label`, so the two don't collide. This is gated to `/ai-studio/kb/coach/selected` specifically, separate from the list page's own logic, so a change to one can't accidentally start touching the other.
 
 **Column reordering was attempted and reverted.** An earlier version physically moved `<td>`/`<th>` DOM nodes to reorder columns. That table is actively managed by React, and moving nodes it owns turned out to risk real data ending up under the wrong header on re-render (confirmed while testing — not hypothetical). Column *hiding* avoids this entirely since it only toggles an existing node's visibility rather than relocating it.
 

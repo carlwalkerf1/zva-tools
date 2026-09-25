@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.6.0
-// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, and hides the Zoom top nav + sidebar - Coach page only for now
+// @version      1.7.0
+// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, and forces Knowledge base = FirstUp KB on the individual query page - Coach page only for now
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
 // @run-at       document-idle
@@ -25,6 +25,8 @@
     // { idSuffix: 'match-type-input', labels: ['No match'] },
   ];
   const DESIRED_PAGE_SIZE = '100 per page';
+  // On the individual query page (/ai-studio/kb/coach/selected), always force this KB.
+  const DESIRED_KNOWLEDGE_BASE = 'FirstUp KB';
   // --------------------------------------------------
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -192,6 +194,46 @@
     await closePopover(filterRoot, combo);
   }
 
+  // ---- Individual query page (/ai-studio/kb/coach/selected) ----
+  // Its "Knowledge base" dropdown is the same Prism component as everything above
+  // (just a different CSS build hash), so this reuses openPopoverFor/findOption/
+  // closePopover directly. Unlike the list page's filters, this one has no stable
+  // id at all - it's found by the combobox's aria-label, which the list page's own
+  // "Knowledge base" filter does NOT carry (that one only has a placeholder), so
+  // this selector doesn't collide with it.
+  async function ensureKnowledgeBaseSelected(desiredLabel) {
+    const combo = document.querySelector('input[aria-label="Knowledge base"]');
+    if (!combo) return;
+    const filterRoot = combo.closest('.prism-InputOutline-root');
+    if (!filterRoot) return;
+
+    const popover = await openPopoverFor(filterRoot, combo);
+    if (!popover) return;
+
+    const found = findOption(popover, desiredLabel);
+    if (!found) {
+      console.warn('[coach-auto-filters] knowledge base option not found:', desiredLabel);
+    } else if (!found.isSelected()) {
+      if (found.kind === 'checkbox') {
+        found.el.click();
+      } else {
+        simulateRealClick(found.el);
+      }
+      await sleep(150);
+    }
+
+    await closePopover(filterRoot, combo);
+  }
+
+  async function runSelectedPage() {
+    try {
+      await waitFor(() => document.querySelector('input[aria-label="Knowledge base"]'), 15000);
+      await ensureKnowledgeBaseSelected(DESIRED_KNOWLEDGE_BASE);
+    } catch {
+      console.warn('[coach-auto-filters] knowledge base control never appeared on /selected page');
+    }
+  }
+
   async function applyAllFilters() {
     for (const { idSuffix, labels } of DESIRED_FILTERS) {
       const root = findFilterRoot(idSuffix);
@@ -222,11 +264,15 @@
     }
   }
 
-  // Filters/buttons/column-hiding are Coach-page-specific; the navbar hiding
-  // below applies to every /ai-studio/kb/* page.
-  const isCoachPage = () => location.pathname.includes('/ai-studio/kb/coach');
+  // The list page (filters/buttons/column-hiding/navbar) vs. the individual query
+  // page (/coach/selected, its own Knowledge base dropdown) need separate gating -
+  // isCoachPage() explicitly excludes /selected so the two don't run into each other.
+  const isCoachPage = () =>
+    location.pathname.includes('/ai-studio/kb/coach') && !isCoachSelectedPage();
+  const isCoachSelectedPage = () => location.pathname.includes('/ai-studio/kb/coach/selected');
 
   if (isCoachPage()) run();
+  if (isCoachSelectedPage()) runSelectedPage();
 
   // ---- "Needs Coaching" button + "show only blank disposition" toggle ----
   // The table is a plain ARIA grid (<table role=...>), not a Prism popover-based
@@ -372,7 +418,8 @@
     const path = location.pathname + location.search;
     if (path !== lastPath) {
       lastPath = path;
-      if (location.pathname.includes('/ai-studio/kb/coach')) setTimeout(run, 500);
+      if (isCoachPage()) setTimeout(run, 500);
+      if (isCoachSelectedPage()) setTimeout(runSelectedPage, 500);
     }
   };
   ['pushState', 'replaceState'].forEach((fn) => {
