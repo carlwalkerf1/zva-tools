@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.7.0
+// @version      1.7.1
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, and forces Knowledge base = FirstUp KB on the individual query page - Coach page only for now
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -202,15 +202,23 @@
   // "Knowledge base" filter does NOT carry (that one only has a placeholder), so
   // this selector doesn't collide with it.
   async function ensureKnowledgeBaseSelected(desiredLabel) {
-    const combo = document.querySelector('input[aria-label="Knowledge base"]');
+    const combos = document.querySelectorAll('input[aria-label="Knowledge base"]');
+    console.log('[coach-auto-filters] KB: matching combos found =', combos.length);
+    const combo = combos[0];
     if (!combo) return;
     const filterRoot = combo.closest('.prism-InputOutline-root');
+    console.log('[coach-auto-filters] KB: filterRoot found?', !!filterRoot);
     if (!filterRoot) return;
 
     const popover = await openPopoverFor(filterRoot, combo);
+    console.log('[coach-auto-filters] KB: popover opened?', !!popover);
     if (!popover) return;
 
+    const allLabels = [...popover.querySelectorAll(OPTION_SELECTOR)].map((el) => el.getAttribute('aria-label'));
+    console.log('[coach-auto-filters] KB: options visible =', allLabels);
+
     const found = findOption(popover, desiredLabel);
+    console.log('[coach-auto-filters] KB: found target option?', !!found, found && found.kind);
     if (!found) {
       console.warn('[coach-auto-filters] knowledge base option not found:', desiredLabel);
     } else if (!found.isSelected()) {
@@ -220,17 +228,23 @@
         simulateRealClick(found.el);
       }
       await sleep(150);
+      console.log('[coach-auto-filters] KB: clicked, now selected?', found.isSelected());
+    } else {
+      console.log('[coach-auto-filters] KB: already selected, skipping click');
     }
 
     await closePopover(filterRoot, combo);
+    console.log('[coach-auto-filters] KB: done');
   }
 
   async function runSelectedPage() {
+    console.log('[coach-auto-filters] runSelectedPage: waiting for KB control...');
     try {
       await waitFor(() => document.querySelector('input[aria-label="Knowledge base"]'), 15000);
+      console.log('[coach-auto-filters] runSelectedPage: KB control found, proceeding');
       await ensureKnowledgeBaseSelected(DESIRED_KNOWLEDGE_BASE);
-    } catch {
-      console.warn('[coach-auto-filters] knowledge base control never appeared on /selected page');
+    } catch (e) {
+      console.warn('[coach-auto-filters] knowledge base control never appeared on /selected page', e);
     }
   }
 
