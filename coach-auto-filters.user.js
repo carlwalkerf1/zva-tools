@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.5.1
+// @version      1.6.0
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, and hides the Zoom top nav + sidebar - Coach page only for now
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -259,22 +259,40 @@
 
   const getRowCheckbox = (row) => row.querySelector('.ui-Table-selection-column input[type="checkbox"]');
 
-  function selectNeedsCoachingRows() {
+  async function selectNeedsCoachingRows(button) {
     const colIndex = getDispositionColIndex();
     if (!colIndex) {
       console.warn('[coach-auto-filters] could not find the Disposition column');
       return;
     }
+
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Working...';
+    // Yield once so the browser actually paints that label change before the
+    // click loop below starts - otherwise the update and the (possibly slow,
+    // fully synchronous) loop happen in the same frame and it never renders.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     let count = 0;
-    getBodyRows().forEach((row) => {
-      if (!isRowBlankDisposition(row, colIndex)) return;
-      const checkbox = getRowCheckbox(row);
-      if (checkbox && !checkbox.checked) {
-        checkbox.click();
-        count++;
+    const rows = [...getBodyRows()];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (isRowBlankDisposition(row, colIndex)) {
+        const checkbox = getRowCheckbox(row);
+        if (checkbox && !checkbox.checked) {
+          checkbox.click();
+          count++;
+        }
       }
-    });
+      // Yield periodically so the tab stays responsive and checkboxes visibly
+      // tick as it goes, rather than the page freezing until it's all done.
+      if (i % 10 === 9) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
     console.log('[coach-auto-filters] selected', count, 'row(s) with blank Disposition');
+    button.disabled = false;
+    button.textContent = originalLabel;
   }
 
   let hideNonBlankActive = false;
@@ -307,7 +325,7 @@
     needsCoachingBtn.dataset.coachHelper = 'needs-coaching';
     needsCoachingBtn.style.cssText = HELPER_BUTTON_STYLE;
     needsCoachingBtn.title = 'Check every row on this page whose Disposition is blank';
-    needsCoachingBtn.addEventListener('click', selectNeedsCoachingRows);
+    needsCoachingBtn.addEventListener('click', () => selectNeedsCoachingRows(needsCoachingBtn));
 
     const hideBtn = document.createElement('button');
     hideBtn.type = 'button';

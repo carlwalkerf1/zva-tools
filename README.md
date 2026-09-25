@@ -55,6 +55,8 @@ Remove an entry (or add another column's exact header text) to change what's hid
 
 Located next to the **Reset** button in the filter bar. It reads the table's `Disposition` column (found dynamically by header text, not a hardcoded position) and clicks the row checkbox for every row where that column reads blank (`--`). This only affects rows currently loaded on the page — for large result sets you'd still page through and click it on each page.
 
+Clicking a lot of checkboxes at once (up to 100 on a full page) is genuinely slow, since each one triggers the app's own re-render - the button shows **"Working..."** and disables itself while that runs so it doesn't look stuck, and yields periodically so the checkboxes visibly tick one by one instead of the tab freezing until it's all done.
+
 ## Hiding the top nav and sidebar
 
 A tiny toggle button sits pinned to the top-left corner of the Coach page. It starts as **"Show navbars"** (meaning: navbars are currently hidden, click to bring them back) and flips to **"Hide navbars"** once shown. This is a pure `display: none` toggle — it never moves or restructures anything, so it can't scramble page content the way DOM reordering could (see below).
