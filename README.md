@@ -26,7 +26,23 @@ By default it sets:
 5. Enable Allow User Scripts.
 6. **[Click here to install the script](https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js)** — Tampermonkey will detect it and show an install prompt automatically.
 
-Updates: since this script's `@updateURL` points back at this repo, Tampermonkey will pick up future changes automatically — no need to reinstall.
+### Updates: don't rely on auto-update actually happening
+
+This script's `@updateURL` is wired up so Tampermonkey *should* pick up new versions on its own. In practice, on at least one real install (Tampermonkey v5.5.0, Chrome, Manifest V3), it silently stopped checking entirely and stayed on an old version for 12+ days despite correct settings (interval set, "Automatic installation" checked). This wasn't specific to this script or repo — a second, unrelated userscript on the same machine had the exact same problem.
+
+Investigation pointed at Tampermonkey's own background process, not anything on our end:
+
+- Chrome policy (`chrome://policy`) showed **no** organization-pushed policies affecting Tampermonkey at all - ruled out IT/enterprise restriction as the cause.
+- Tampermonkey's own service-worker console (`chrome://extensions` → Tampermonkey card → "service worker" link) showed hundreds of repeated `Cannot create item with duplicate id` errors - a documented, currently-open Tampermonkey bug ([#2893](https://github.com/Tampermonkey/tampermonkey/issues/2893)) where a Chrome back/forward-cache restore causes menu commands to re-register without cleaning up the old ones, eventually wedging the background process until the browser is fully restarted.
+- After restarting the browser, that specific error went away, but a *different* warning appeared instead - `alarm: no data for alarm ...` - consistent with Tampermonkey's periodic update-check alarm firing after its own state (which the update logic needs) had already been wiped by Chrome recycling the idle service worker, a routine occurrence under Manifest V3.
+
+Net effect: this looks like a genuine reliability problem in how this Tampermonkey version manages its own background state under Manifest V3, not a one-off fluke and not fixable from the userscript side. **Treat manual reinstall as the standing update process**, not something to set-and-forget:
+
+1. Open Tampermonkey's Dashboard → **Utilities** tab → **Import from URL**.
+2. Paste `https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js` → **Install**.
+3. Confirm the version shown afterward on the **Installed Userscripts** tab actually matches what's in this repo.
+
+If a future Tampermonkey release fixes #2893 (or the underlying alarm/state-persistence issue) and auto-update starts working reliably again, this section should be revisited rather than assumed fixed.
 
 ## Customizing
 
