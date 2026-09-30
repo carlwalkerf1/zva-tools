@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.7.1
+// @version      1.8.0
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, and forces Knowledge base = FirstUp KB on the individual query page - Coach page only for now
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -351,6 +351,12 @@
     }
 
     console.log('[coach-auto-filters] selected', count, 'row(s) with blank Disposition');
+    if (count === 0) {
+      // Otherwise clicking this with nothing left to coach looks identical to it
+      // being broken - nothing visibly happens either way.
+      button.textContent = 'Nothing to select!';
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
     button.disabled = false;
     button.textContent = originalLabel;
   }
