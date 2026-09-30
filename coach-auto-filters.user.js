@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.8.0
+// @version      1.8.1
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, and forces Knowledge base = FirstUp KB on the individual query page - Coach page only for now
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -459,10 +459,12 @@
   // fire-once apply missed it. Unlike the table, hiding is a plain style toggle with no
   // node-moving, so polling to catch late mounts / re-renders carries none of the
   // reorder's data-misalignment risk - worst case is a brief flash of the element.
-  // Target the sticky wrapper column around #sidemenu, not the aside itself -
-  // hiding just the aside left its parent's own box (and background) behind as
-  // an empty gray rectangle still reserving the width.
-  const NAVBAR_SELECTORS = ['#header_container', '.nav-menu.nav-menu-sticky-layout'];
+  // Target the wrapper column around #sidemenu, not the aside itself - hiding
+  // just the aside left its parent's own box (and background) behind as an
+  // empty gray rectangle still reserving the width. Class name has changed
+  // once already (was .nav-menu.nav-menu-sticky-layout, now plain .nav-menu)
+  // after a Zoom redesign - if the sidebar reappears again, check this first.
+  const NAVBAR_SELECTORS = ['#header_container', '.nav-menu'];
   let navbarsHidden = true;
 
   function applyNavbarVisibility() {
