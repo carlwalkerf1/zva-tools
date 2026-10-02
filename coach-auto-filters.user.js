@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.8.1
+// @version      1.8.2
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, and forces Knowledge base = FirstUp KB on the individual query page - Coach page only for now
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -266,7 +266,22 @@
 
     // Clicking the page-size control (at the bottom of the table) leaves the
     // page scrolled down there - scroll back to the top once we're done with it.
+    // window.scrollTo alone isn't reliable here: the actual scrolled container
+    // may be a nested div rather than the window/document itself, and the table
+    // re-rendering with more rows after the page-size change can re-trigger a
+    // scroll-into-view on whatever still has focus. So this resets every
+    // scrolled-down element it can find, both now and again shortly after to
+    // catch that late re-render.
+    scrollEverythingToTop();
+    setTimeout(scrollEverythingToTop, 500);
+  }
+
+  function scrollEverythingToTop() {
     window.scrollTo({ top: 0, behavior: 'instant' });
+    if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    document.querySelectorAll('*').forEach((el) => {
+      if (el.scrollTop > 0) el.scrollTop = 0;
+    });
   }
 
   async function run() {
