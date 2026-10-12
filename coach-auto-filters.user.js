@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.8.2
+// @version      1.9.0
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, and forces Knowledge base = FirstUp KB on the individual query page - Coach page only for now
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -248,7 +248,22 @@
     }
   }
 
+  // Expands the "More filters (N)" row (Topic/Product type/Engagement outcome/
+  // Language) so it's visible by default instead of collapsed. Matched by
+  // aria-label prefix rather than the full "(4)" text, since that count could
+  // change; once expanded the button's label changes away from "More filters"
+  // (it becomes "Hide"), so this is naturally a no-op if already expanded -
+  // it won't fight you if you collapse it back down yourself.
+  function ensureMoreFiltersExpanded() {
+    const btn = [...document.querySelectorAll('button[aria-label]')].find((b) =>
+      b.getAttribute('aria-label').trim().startsWith('More filters')
+    );
+    if (btn) simulateRealClick(btn);
+  }
+
   async function applyAllFilters() {
+    ensureMoreFiltersExpanded();
+
     for (const { idSuffix, labels } of DESIRED_FILTERS) {
       const root = findFilterRoot(idSuffix);
       if (root) {
