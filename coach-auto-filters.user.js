@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.9.0
-// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, and forces Knowledge base = FirstUp KB on the individual query page - Coach page only for now
+// @version      1.10.0
+// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, forces Knowledge base = FirstUp KB and shows Disposition/Engagement outcome on the individual query page, fixes Engagement ID links so the transcript loads and auto-opens past the standard bot greeting, and adds a Zendesk-search button on escalated transcripts
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
+// @match        https://zoom.us/ai-studio/report*
+// @match        https://firstup.zendesk.com/agent/*
 // @run-at       document-idle
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/carlwalkerf1/zva-tools/main/coach-auto-filters.user.js
@@ -322,14 +324,19 @@
   // The table is a plain ARIA grid (<table role=...>), not a Prism popover-based
   // widget, so no click-simulation tricks are needed here - just reading cells
   // and clicking real checkboxes.
-
-  // Most header cells' text lives in a `.ui-Table-cell-label` span, but "Query" has a
-  // tooltip icon and renders without that class - read the whole header-wrapper's text
-  // instead, since icons contribute no text content and this covers every column.
+  //
+  // Zoom rebuilt this table on the Prism design system at some point after 2026-09
+  // (`ui-Table-*` classes -> `prism-Table-*`), which silently broke every column-label
+  // lookup below - this is the SECOND time this table's markup has changed under us
+  // (see also the sidebar wrapper class change noted further down), so expect a third.
+  // The label text now lives directly on `.prism-Table-headerCellWrapper` (even for a
+  // header with an info-tooltip icon button, like "Query" - the icon is a plain SVG
+  // with no text nodes, so it doesn't contaminate textContent), and a body cell's value
+  // is the `<td>`'s own textContent directly - no inner label span anymore.
   function getColIndexByLabel(label) {
     const headerCells = document.querySelectorAll('thead th[role="columnheader"]');
     for (const th of headerCells) {
-      const wrapper = th.querySelector('.ui-Table-header-wrapper');
+      const wrapper = th.querySelector('.prism-Table-headerCellWrapper');
       if (wrapper && wrapper.textContent.trim() === label) {
         return th.getAttribute('aria-colindex');
       }
@@ -341,13 +348,90 @@
   const getBodyRows = () => document.querySelectorAll('tbody tr[role="row"]');
 
   function isRowBlankDisposition(row, colIndex) {
-    const cell = row.querySelector(`td[aria-colindex="${colIndex}"] .ui-Table-cell-label`);
+    const cell = row.querySelector(`td[aria-colindex="${colIndex}"]`);
     if (!cell) return false;
     const text = cell.textContent.trim();
     return text === '' || text === '--';
   }
 
-  const getRowCheckbox = (row) => row.querySelector('.ui-Table-selection-column input[type="checkbox"]');
+  const getRowCheckbox = (row) => row.querySelector('.prism-Table-selectionColumn input[type="checkbox"]');
+
+  function getCellText(row, colIndex) {
+    if (!colIndex) return null;
+    const cell = row.querySelector(`td[aria-colindex="${colIndex}"]`);
+    const text = cell && cell.textContent.trim();
+    return text || null;
+  }
+
+  // ---- Carry Disposition / Engagement outcome across navigation ----
+  // The individual query page (/coach/selected) doesn't show either value itself, even
+  // though the list page's table does - capture them off the row at the moment it's
+  // clicked (before React unmounts it navigating away) and stash them for the next page
+  // to pick up. This is same-tab client-side routing, so sessionStorage survives it.
+  const ROW_DATA_STORAGE_KEY = 'zva-tools:lastClickedRow';
+  const ROW_DATA_MAX_AGE_MS = 30000; // ignore stale leftovers from a much earlier click
+
+  function captureRowDataOnClick(e) {
+    const row = e.target.closest('tbody tr[role="row"]');
+    if (!row) return;
+    const data = {
+      disposition: getCellText(row, getColIndexByLabel('Disposition')),
+      outcome: getCellText(row, getColIndexByLabel('Engagement outcome')),
+      ts: Date.now(),
+    };
+    try {
+      sessionStorage.setItem(ROW_DATA_STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      // sessionStorage unavailable (e.g. private mode) - the receiving page just won't
+      // have anything to show, which is a silent no-op there too.
+    }
+  }
+
+  // Capture phase, not bubble - so this reads the row before any click-triggered
+  // re-render/navigation can unmount it, regardless of what the click actually did.
+  if (isCoachPage()) document.addEventListener('click', captureRowDataOnClick, true);
+
+  function readCarriedRowData() {
+    try {
+      const raw = sessionStorage.getItem(ROW_DATA_STORAGE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (Date.now() - data.ts > ROW_DATA_MAX_AGE_MS) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  function makeLabeledSpan(label, value) {
+    const span = document.createElement('span');
+    span.dataset.coachHelper = 'disposition-outcome';
+    const strong = document.createElement('strong');
+    strong.textContent = `${label}: `;
+    span.appendChild(strong);
+    span.appendChild(document.createTextNode(value));
+    return span;
+  }
+
+  // ---- Individual query page: display Disposition / Engagement outcome ----
+  // Query match type is already shown in `.query-footer` - this adds the other two so
+  // you don't have to go back to the list to remember what you're looking at.
+  function injectDispositionAndOutcome() {
+    const footer = document.querySelector('.query-footer');
+    if (!footer || footer.querySelector('[data-coach-helper="disposition-outcome"]')) return;
+
+    const data = readCarriedRowData();
+    if (!data || (!data.disposition && !data.outcome)) return;
+
+    if (data.disposition) footer.appendChild(makeLabeledSpan('Disposition', data.disposition));
+    if (data.outcome) footer.appendChild(makeLabeledSpan('Engagement outcome', data.outcome));
+  }
+
+  // Unconditional, not gated by isCoachSelectedPage() - that page is always reached via
+  // a same-tab client-side navigation from the list (never a fresh page load), so a
+  // check made once at script-load time would always see the list page's URL and never
+  // re-evaluate. `.query-footer` only exists on that page anyway, so it's the real gate.
+  setInterval(injectDispositionAndOutcome, 1000);
 
   async function selectNeedsCoachingRows(button) {
     const colIndex = getDispositionColIndex();
@@ -462,6 +546,196 @@
 
   if (isCoachPage()) setInterval(hideUnwantedColumns, 1500);
 
+  // ---- Fix Engagement ID transcript links ----
+  // Clicking an Engagement ID often lands on a blank transcript page (zva-tools#1).
+  // Root cause: the link's own `start`/`end` params are either a single day (the
+  // query's own date, on the list page) or missing entirely (on the individual
+  // /coach/selected page) - either way, too narrow/absent a window for the report
+  // page to reliably resolve, apparently due to some timezone rounding on exactly
+  // that day. A wide window reliably works instead (confirmed by hand), so this
+  // overwrites start/end on every such link to [Star 3.0 rollout date -> today],
+  // which comfortably covers any engagement without needing per-link guesswork.
+  const ENGAGEMENT_LINK_START_DATE = '2026-08-17'; // Star 3.0 rollout
+  const todayDateString = () => {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  };
+
+  // Also tucks the engagement's outcome into a `zvaOutcome` param, carried along so the
+  // report page (a new tab - no shared sessionStorage, see below) knows whether to show
+  // the Zendesk-search button in the transcript. On the list page that's read straight off
+  // the link's own row; on /coach/selected (no table row there) it falls back to whatever
+  // was carried over from the list-page click, same as the Disposition/outcome display above.
+  //
+  // The href is a hash-route URL - its query string lives after the `#`, not in the
+  // real URL search part, so it can't be read via `new URL(href).searchParams`.
+  function patchEngagementLink(a, outcomeColIndex, carriedRowData) {
+    const href = a.getAttribute('href');
+    if (!href) return;
+    const hashIdx = href.indexOf('#');
+    if (hashIdx === -1) return;
+    const beforeHash = href.slice(0, hashIdx + 1);
+    const afterHash = href.slice(hashIdx + 1);
+    const qIdx = afterHash.indexOf('?');
+    if (qIdx === -1) return;
+    const routePath = afterHash.slice(0, qIdx);
+    const params = new URLSearchParams(afterHash.slice(qIdx + 1));
+    if (!params.has('engagementId')) return;
+    params.set('start', ENGAGEMENT_LINK_START_DATE);
+    params.set('end', todayDateString());
+
+    const row = a.closest('tbody tr[role="row"]');
+    const outcome = row ? getCellText(row, outcomeColIndex) : carriedRowData && carriedRowData.outcome;
+    if (outcome) params.set('zvaOutcome', outcome);
+
+    const newHref = `${beforeHash}${routePath}?${params.toString()}`;
+    if (href !== newHref) a.setAttribute('href', newHref);
+  }
+
+  function patchAllEngagementLinks() {
+    // Computed once per tick rather than once per link - these don't vary per-link.
+    const outcomeColIndex = getColIndexByLabel('Engagement outcome'); // null off the list page
+    const carriedRowData = outcomeColIndex ? null : readCarriedRowData();
+    document
+      .querySelectorAll('a[href*="/ai-studio/report#/analytics/reports/conversation-details"]')
+      .forEach((a) => patchEngagementLink(a, outcomeColIndex, carriedRowData));
+  }
+
+  // Runs on both the list and /selected pages (the link shows up on both), and on an
+  // interval rather than once since the table/page re-renders fresh anchors as it loads.
+  setInterval(patchAllEngagementLinks, 1000);
+
+  // ---- Report page: auto-open the transcript drawer ----
+  // After the corrected Engagement ID link lands here, opening the transcript still
+  // took manually scrolling to the engagement log row's "More actions" menu and
+  // clicking "View transcript" (zva-tools#1). That menu is teleported into the DOM
+  // without a stable id linking it back to its trigger button, so it's found generically
+  // (any open `ul[role="menu"]`) rather than via the trigger's aria-controls value.
+  //
+  // Scoped to conversation-details pages that actually carry an engagementId - NOT
+  // every /ai-studio/report* page - so this never fires on some other analytics
+  // table elsewhere in the wider report product that happens to have its own
+  // unrelated "More actions" menu.
+  const isReportPage = () => location.pathname.includes('/ai-studio/report');
+  const isSingleEngagementPage = () =>
+    location.hash.includes('conversation-details') && location.hash.includes('engagementId=');
+
+  async function openTranscriptForLoadedEngagement() {
+    if (document.querySelector('.chat-transcript-drawer')) return; // already open
+
+    const moreBtns = document.querySelectorAll('button[aria-label="More actions"]');
+    if (moreBtns.length === 0) return; // engagement log row hasn't rendered yet
+    const moreBtn = moreBtns[0];
+    if (moreBtn.dataset.zvaAutoClicked) return; // already tried this element once
+    moreBtn.dataset.zvaAutoClicked = '1';
+
+    if (moreBtns.length > 1) {
+      console.warn(
+        '[coach-auto-filters] expected one engagement log row but found',
+        moreBtns.length,
+        '- using the first (newest) one'
+      );
+    }
+
+    simulateRealClick(moreBtn);
+
+    let viewTranscriptItem;
+    try {
+      viewTranscriptItem = await waitFor(
+        () =>
+          [...document.querySelectorAll('ul[role="menu"] li[role="menuitem"]')].find(
+            (li) => li.textContent.trim() === 'View transcript'
+          ),
+        3000
+      );
+    } catch {
+      console.warn('[coach-auto-filters] "View transcript" menu item never appeared');
+      return;
+    }
+
+    simulateRealClick(viewTranscriptItem);
+  }
+
+  if (isReportPage()) {
+    setInterval(() => {
+      if (isSingleEngagementPage()) openTranscriptForLoadedEngagement();
+    }, 1000);
+  }
+
+  // ---- Report page: skip the transcript's standard bot greeting ----
+  // Every transcript opens on the same fixed "Hi! I'm Star..." boilerplate greeting
+  // (zva-tools#1) - once the drawer is open and rendered, jump straight to the second
+  // message instead of making you scroll past the greeting by hand every time.
+  const GREETING_MARKER_TEXT = 'Firstup Self-Service bot';
+
+  function maybeScrollPastGreeting() {
+    const drawer = document.querySelector('.chat-transcript-drawer');
+    if (!drawer || drawer.dataset.zvaScrolledPastGreeting) return;
+
+    const messages = drawer.querySelectorAll('.zm-chatsdk__message');
+    if (messages.length < 2) return; // transcript hasn't finished rendering yet
+
+    if (!messages[0].textContent.includes(GREETING_MARKER_TEXT)) return;
+
+    messages[1].scrollIntoView({ block: 'start' });
+    // Mark it handled so this doesn't keep yanking the scroll position back down
+    // if you manually scroll back up to re-read the greeting.
+    drawer.dataset.zvaScrolledPastGreeting = '1';
+  }
+
+  if (isReportPage()) setInterval(maybeScrollPastGreeting, 500);
+
+  // ---- Report page: "Search Zendesk" button on escalated transcripts ----
+  // Only worth offering when the original query escalated - that's when the Zendesk
+  // ticket (and its resolution) actually exists to search for. The outcome value travels
+  // here via the `zvaOutcome` param added above, since this report page is a new tab with
+  // no shared sessionStorage with the Coach page tab that linked here.
+  //
+  // There's no shared identifier between an engagement and its Zendesk ticket, and the
+  // customer's wording in the ticket is often reworded slightly from the transcript - so
+  // this adds the button to every Consumer message rather than guessing which one, and
+  // you pick whichever one you were actually looking at.
+  function engagementOutcomeFromUrl() {
+    const qIdx = location.hash.indexOf('?');
+    if (qIdx === -1) return null;
+    return new URLSearchParams(location.hash.slice(qIdx + 1)).get('zvaOutcome');
+  }
+
+  const ZENDESK_SEARCH_BUTTON_STYLE =
+    'display: inline-block; margin-top: 4px; padding: 2px 8px; font-size: 12px; ' +
+    'border-radius: 6px; border: 1px solid #c8ccd4; background: #fff; cursor: pointer;';
+
+  function injectZendeskSearchButtons() {
+    if (engagementOutcomeFromUrl() !== 'Escalation') return;
+
+    const consumerMessages = document.querySelectorAll(
+      '.chat-transcript-drawer .zm-chatsdk__message[aria-label="Message from Consumer"]'
+    );
+    consumerMessages.forEach((message) => {
+      if (message.querySelector('[data-coach-helper="zendesk-search"]')) return;
+      const bubble = message.querySelector('.zm-chatsdk__text-block, .zm-chatsdk__html-block');
+      if (!bubble) return;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.coachHelper = 'zendesk-search';
+      btn.textContent = 'Search Zendesk';
+      btn.style.cssText = ZENDESK_SEARCH_BUTTON_STYLE;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const query = bubble.textContent.trim();
+        const url = `https://firstup.zendesk.com/agent/search/1?zvaQuery=${encodeURIComponent(query)}`;
+        window.open(url, '_blank', 'noopener,noreferrer');
+      });
+
+      message.appendChild(btn);
+    });
+  }
+
+  if (isReportPage()) setInterval(injectZendeskSearchButtons, 1000);
+
   // Re-run if the app navigates here via client-side routing instead of a full page load.
   let lastPath = location.pathname + location.search;
   const maybeRerun = () => {
@@ -534,6 +808,52 @@
     document.body.appendChild(btn);
   }
 
-  injectNavbarToggle();
-  setInterval(applyNavbarVisibility, 1000);
+  // Targets only the Zoom Coach page's own navbars - scope the toggle button and the
+  // interval that applies it to Coach pages too, now that the script also runs on the
+  // report page and Zendesk (added above), neither of which has anything for this to hide.
+  if (isCoachPage() || isCoachSelectedPage()) {
+    injectNavbarToggle();
+    setInterval(applyNavbarVisibility, 1000);
+  }
+
+  // ---- Zendesk: run the search carried over from the "Search Zendesk" button ----
+  // Picks up the `zvaQuery` param from the URL (see injectZendeskSearchButtons above),
+  // types it into the advanced search box, and submits it - so the new tab lands
+  // straight on results instead of an empty search page.
+  function zvaQueryFromUrl() {
+    return new URLSearchParams(location.search).get('zvaQuery');
+  }
+
+  // A plain `input.value = ...` doesn't notify React's controlled-input tracking (it
+  // patches the native setter to detect real typing) - going through the native setter
+  // directly, then dispatching `input`, is what makes React's own state actually update.
+  function setNativeInputValue(input, value) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  const ZENDESK_SEARCH_INPUT_SELECTOR =
+    'input[data-test-id="search_advanced-search-box_input-field_media-input"]';
+
+  async function runZendeskAutoSearch() {
+    const query = zvaQueryFromUrl();
+    if (!query) return;
+
+    let input;
+    try {
+      input = await waitFor(() => document.querySelector(ZENDESK_SEARCH_INPUT_SELECTOR), 10000);
+    } catch {
+      console.warn('[coach-auto-filters] Zendesk search input never appeared');
+      return;
+    }
+
+    setNativeInputValue(input, query);
+    await sleep(200);
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
+    );
+  }
+
+  if (location.hostname === 'firstup.zendesk.com') runZendeskAutoSearch();
 })();
