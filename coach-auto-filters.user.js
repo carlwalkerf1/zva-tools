@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.10.0
+// @version      1.11.0
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, forces Knowledge base = FirstUp KB and shows Disposition/Engagement outcome on the individual query page, fixes Engagement ID links so the transcript loads and auto-opens past the standard bot greeting, and adds a Zendesk-search button on escalated transcripts
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -703,12 +703,22 @@
     return new URLSearchParams(location.hash.slice(qIdx + 1)).get('zvaOutcome');
   }
 
+  // Captured ONCE, synchronously, at script load - not re-read on every interval tick.
+  // Defensive hardening (not a confirmed root cause - the button issue this was meant to
+  // explain turned out to be something else, see zva-tools#1 follow-up): IF the report
+  // app ever normalizes/rewrites its own hash after mount the way it already does for the
+  // start/end date window, re-reading location.hash on every tick could make this gate
+  // pass on an early tick and then start failing later - right around when the transcript
+  // drawer finishes rendering and there'd be messages to attach the button to. Reading it
+  // once here, before the app has any chance to rewrite anything, is immune to that either way.
+  const CAPTURED_ENGAGEMENT_OUTCOME = engagementOutcomeFromUrl();
+
   const ZENDESK_SEARCH_BUTTON_STYLE =
     'display: inline-block; margin-top: 4px; padding: 2px 8px; font-size: 12px; ' +
     'border-radius: 6px; border: 1px solid #c8ccd4; background: #fff; cursor: pointer;';
 
   function injectZendeskSearchButtons() {
-    if (engagementOutcomeFromUrl() !== 'Escalation') return;
+    if (CAPTURED_ENGAGEMENT_OUTCOME !== 'Escalation') return;
 
     const consumerMessages = document.querySelectorAll(
       '.chat-transcript-drawer .zm-chatsdk__message[aria-label="Message from Consumer"]'
@@ -725,7 +735,7 @@
       btn.style.cssText = ZENDESK_SEARCH_BUTTON_STYLE;
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const query = bubble.textContent.trim();
+        const query = `${bubble.textContent.trim()} order_by:created_at sort:desc`;
         const url = `https://firstup.zendesk.com/agent/search/1?zvaQuery=${encodeURIComponent(query)}`;
         window.open(url, '_blank', 'noopener,noreferrer');
       });
