@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.11.0
+// @version      1.12.0
 // @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, forces Knowledge base = FirstUp KB and shows Disposition/Engagement outcome on the individual query page, fixes Engagement ID links so the transcript loads and auto-opens past the standard bot greeting, and adds a Zendesk-search button on escalated transcripts
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
@@ -596,8 +596,17 @@
 
   function patchAllEngagementLinks() {
     // Computed once per tick rather than once per link - these don't vary per-link.
-    const outcomeColIndex = getColIndexByLabel('Engagement outcome'); // null off the list page
-    const carriedRowData = outcomeColIndex ? null : readCarriedRowData();
+    // Read BOTH unconditionally - don't assume outcomeColIndex is only ever truthy on
+    // the list page. It wasn't: Zoom's SPA can leave the list table's header markup
+    // (or something else matching the same label) mounted in the DOM even on
+    // /coach/selected, which made outcomeColIndex resolve truthy there too and silently
+    // disabled the carriedRowData fallback for every link on that page - even though
+    // the Engagement ID link there isn't actually inside a matching table row, so
+    // patchEngagementLink's own per-link `row` check was always going to fall through
+    // to carriedRowData anyway. Letting each link decide for itself (via its own `row`
+    // lookup) rather than gating the fallback on a page-wide heuristic fixes it.
+    const outcomeColIndex = getColIndexByLabel('Engagement outcome');
+    const carriedRowData = readCarriedRowData();
     document
       .querySelectorAll('a[href*="/ai-studio/report#/analytics/reports/conversation-details"]')
       .forEach((a) => patchEngagementLink(a, outcomeColIndex, carriedRowData));
