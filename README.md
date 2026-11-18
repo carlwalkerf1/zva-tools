@@ -10,7 +10,7 @@ A [Tampermonkey](https://www.tampermonkey.net/) userscript for the Zoom AI Studi
 - On the individual query page (`https://zoom.us/ai-studio/kb/coach/selected`), always forces **Knowledge base = FirstUp KB**.
 - Fixes **Engagement ID** links (on both the list and individual query page) so clicking one reliably loads the transcript instead of landing on a blank report page, opens the transcript drawer automatically, and skips its standard bot greeting.
 - On the individual query page, displays **Disposition** and **Engagement outcome** alongside the already-shown Query match type, so you don't have to go back to the list to remember what you're looking at.
-- On an escalated transcript, adds a **"Search Zendesk"** button to every customer message, which opens a Zendesk search for that message's text in a new tab.
+- On any transcript, adds a **"Search Zendesk"** button to every customer message, which opens a Zendesk search for that message's text in a new tab.
 
 By default it sets:
 
@@ -109,11 +109,11 @@ Every transcript then opens on the same fixed bot greeting ("Hi! I'm Star..."). 
 
 That page doesn't show either value natively, even though the list page's table does. The script captures them off the table row at the moment you click it to navigate there (before React unmounts the row) and stashes them in `sessionStorage` for the query page to pick up and display next to Query match type. If you open that page some other way (a refresh, a direct link) there's nothing to carry over, so it just won't show anything — a silent no-op rather than a guess.
 
-## Zendesk search button on escalated transcripts (zva-tools#1)
+## Zendesk search button on transcripts (zva-tools#1)
 
-The other half of zva-tools#1. Only shown when the original query's **Engagement outcome was Escalation** — that's the only time a corresponding Zendesk ticket actually exists to search for. There's no shared identifier between an engagement and its Zendesk ticket, and the customer's wording is often reworded slightly between the chat and the ticket, so rather than guess which message to search, the button is added to **every** customer message in the transcript — you pick whichever one you were actually looking at.
+The other half of zva-tools#1. Shown on **every** customer message in **every** transcript, not just escalated ones. This used to be gated on the original query's Engagement outcome being Escalation - the only case where a corresponding Zendesk ticket is guaranteed to exist - but that required carrying the outcome value through `sessionStorage`, a per-link row lookup, and a URL param into a brand-new tab, and kept finding new ways to silently come back empty (several follow-up fixes, 2026-11-18, none fully reliable). Dropped the gate instead: worst case on a non-escalated transcript the search just comes back with nothing useful, which is cheap compared to the reliability cost of carrying that value. There's also no shared identifier between an engagement and its Zendesk ticket, and the customer's wording is often reworded slightly between the chat and the ticket, so rather than guess which message to search, the button is added to every customer message - you pick whichever one you were actually looking at.
 
-The outcome value has to travel from the Coach page to the report page (a separate tab opened with `noopener`, so no shared `sessionStorage`) — it rides along as a `zvaOutcome` param on the same Engagement ID link that already carries the corrected date window. Clicking "Search Zendesk" opens `https://firstup.zendesk.com/agent/search/1?zvaQuery=<the message text> order_by:created_at sort:desc` in a new tab (the `order_by`/`sort` modifiers are Zendesk's own search-query syntax, appended to the query text itself rather than passed as separate URL params, so results come back newest-first); a matching script section on the Zendesk side reads that `zvaQuery` param, types it into the advanced search box (via React's native input setter, since a plain `.value =` doesn't register with a controlled input), and submits it so the tab lands straight on results.
+Clicking "Search Zendesk" opens `https://firstup.zendesk.com/agent/search/1?zvaQuery=<the message text> order_by:created_at sort:desc` in a new tab (the `order_by`/`sort` modifiers are Zendesk's own search-query syntax, appended to the query text itself rather than passed as separate URL params, so results come back newest-first); a matching script section on the Zendesk side reads that `zvaQuery` param, types it into the advanced search box (via React's native input setter, since a plain `.value =` doesn't register with a controlled input), and submits it so the tab lands straight on results.
 
 ## How it works
 

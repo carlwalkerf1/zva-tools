@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ZVA Tools
 // @namespace    https://github.com/carlwalkerf1/zva-tools
-// @version      1.12.0
-// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, forces Knowledge base = FirstUp KB and shows Disposition/Engagement outcome on the individual query page, fixes Engagement ID links so the transcript loads and auto-opens past the standard bot greeting, and adds a Zendesk-search button on escalated transcripts
+// @version      1.13.0
+// @description  Reapplies filters/page size on the Coach page, adds a "Needs Coaching" button, hides noisy columns, hides the Zoom top nav + sidebar, forces Knowledge base = FirstUp KB and shows Disposition/Engagement outcome on the individual query page, fixes Engagement ID links so the transcript loads and auto-opens past the standard bot greeting, and adds a Zendesk-search button to every transcript
 // @author       carlwalkerf1
 // @match        https://zoom.us/ai-studio/kb/coach*
 // @match        https://zoom.us/ai-studio/report*
@@ -563,15 +563,18 @@
     return `${d.getFullYear()}-${mm}-${dd}`;
   };
 
-  // Also tucks the engagement's outcome into a `zvaOutcome` param, carried along so the
-  // report page (a new tab - no shared sessionStorage, see below) knows whether to show
-  // the Zendesk-search button in the transcript. On the list page that's read straight off
-  // the link's own row; on /coach/selected (no table row there) it falls back to whatever
-  // was carried over from the list-page click, same as the Disposition/outcome display above.
-  //
   // The href is a hash-route URL - its query string lives after the `#`, not in the
   // real URL search part, so it can't be read via `new URL(href).searchParams`.
-  function patchEngagementLink(a, outcomeColIndex, carriedRowData) {
+  //
+  // This used to also tuck the engagement's outcome into a `zvaOutcome` param so the
+  // report page (a new tab, no shared sessionStorage) could decide whether to show the
+  // Zendesk-search button. Dropped (zva-tools#1 follow-up, 2026-11-18): carrying that
+  // value through sessionStorage -> a per-link row/column lookup -> a URL param -> a
+  // one-time read on a different tab had three different ways to silently come back
+  // empty, and kept doing so in practice. The button is now shown unconditionally
+  // instead (see injectZendeskSearchButtons) - worst case it's offered on a transcript
+  // with no matching ticket, which is cheap compared to the reliability cost of this.
+  function patchEngagementLink(a) {
     const href = a.getAttribute('href');
     if (!href) return;
     const hashIdx = href.indexOf('#');
@@ -586,30 +589,14 @@
     params.set('start', ENGAGEMENT_LINK_START_DATE);
     params.set('end', todayDateString());
 
-    const row = a.closest('tbody tr[role="row"]');
-    const outcome = row ? getCellText(row, outcomeColIndex) : carriedRowData && carriedRowData.outcome;
-    if (outcome) params.set('zvaOutcome', outcome);
-
     const newHref = `${beforeHash}${routePath}?${params.toString()}`;
     if (href !== newHref) a.setAttribute('href', newHref);
   }
 
   function patchAllEngagementLinks() {
-    // Computed once per tick rather than once per link - these don't vary per-link.
-    // Read BOTH unconditionally - don't assume outcomeColIndex is only ever truthy on
-    // the list page. It wasn't: Zoom's SPA can leave the list table's header markup
-    // (or something else matching the same label) mounted in the DOM even on
-    // /coach/selected, which made outcomeColIndex resolve truthy there too and silently
-    // disabled the carriedRowData fallback for every link on that page - even though
-    // the Engagement ID link there isn't actually inside a matching table row, so
-    // patchEngagementLink's own per-link `row` check was always going to fall through
-    // to carriedRowData anyway. Letting each link decide for itself (via its own `row`
-    // lookup) rather than gating the fallback on a page-wide heuristic fixes it.
-    const outcomeColIndex = getColIndexByLabel('Engagement outcome');
-    const carriedRowData = readCarriedRowData();
     document
       .querySelectorAll('a[href*="/ai-studio/report#/analytics/reports/conversation-details"]')
-      .forEach((a) => patchEngagementLink(a, outcomeColIndex, carriedRowData));
+      .forEach(patchEngagementLink);
   }
 
   // Runs on both the list and /selected pages (the link shows up on both), and on an
@@ -696,39 +683,24 @@
 
   if (isReportPage()) setInterval(maybeScrollPastGreeting, 500);
 
-  // ---- Report page: "Search Zendesk" button on escalated transcripts ----
-  // Only worth offering when the original query escalated - that's when the Zendesk
-  // ticket (and its resolution) actually exists to search for. The outcome value travels
-  // here via the `zvaOutcome` param added above, since this report page is a new tab with
-  // no shared sessionStorage with the Coach page tab that linked here.
+  // ---- Report page: "Search Zendesk" button on every transcript ----
+  // Originally only shown when the original query's Engagement outcome was Escalation
+  // (that's the only time a corresponding Zendesk ticket is guaranteed to exist) - but
+  // that required carrying the outcome value through sessionStorage, a per-link row
+  // lookup, and a URL param into a brand-new tab, and kept finding new ways to silently
+  // come back empty (zva-tools#1 follow-up, 2026-11-18). Dropped the gate: shown on every
+  // transcript now. Worst case on a non-escalated one the search just comes back with
+  // nothing useful, which is cheap compared to the reliability cost of carrying that value.
   //
   // There's no shared identifier between an engagement and its Zendesk ticket, and the
-  // customer's wording in the ticket is often reworded slightly from the transcript - so
-  // this adds the button to every Consumer message rather than guessing which one, and
-  // you pick whichever one you were actually looking at.
-  function engagementOutcomeFromUrl() {
-    const qIdx = location.hash.indexOf('?');
-    if (qIdx === -1) return null;
-    return new URLSearchParams(location.hash.slice(qIdx + 1)).get('zvaOutcome');
-  }
-
-  // Captured ONCE, synchronously, at script load - not re-read on every interval tick.
-  // Defensive hardening (not a confirmed root cause - the button issue this was meant to
-  // explain turned out to be something else, see zva-tools#1 follow-up): IF the report
-  // app ever normalizes/rewrites its own hash after mount the way it already does for the
-  // start/end date window, re-reading location.hash on every tick could make this gate
-  // pass on an early tick and then start failing later - right around when the transcript
-  // drawer finishes rendering and there'd be messages to attach the button to. Reading it
-  // once here, before the app has any chance to rewrite anything, is immune to that either way.
-  const CAPTURED_ENGAGEMENT_OUTCOME = engagementOutcomeFromUrl();
-
+  // customer's wording is often reworded slightly from the transcript - so this adds the
+  // button to every Consumer message rather than guessing which one, and you pick
+  // whichever one you were actually looking at.
   const ZENDESK_SEARCH_BUTTON_STYLE =
     'display: inline-block; margin-top: 4px; padding: 2px 8px; font-size: 12px; ' +
     'border-radius: 6px; border: 1px solid #c8ccd4; background: #fff; cursor: pointer;';
 
   function injectZendeskSearchButtons() {
-    if (CAPTURED_ENGAGEMENT_OUTCOME !== 'Escalation') return;
-
     const consumerMessages = document.querySelectorAll(
       '.chat-transcript-drawer .zm-chatsdk__message[aria-label="Message from Consumer"]'
     );
